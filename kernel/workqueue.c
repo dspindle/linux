@@ -1816,6 +1816,12 @@ static struct worker *create_worker(struct worker_pool *pool)
 	set_user_nice(worker->task, pool->attrs->nice);
 	kthread_bind_mask(worker->task, pool->attrs->cpumask);
 
+	//??PATCH mkaul@leuze.de 2016-01-22: create kworker thread as realtime threads
+	{
+		static const struct sched_param param = { .sched_priority = 10 };
+		sched_setscheduler_nocheck(worker->task, SCHED_FIFO, &param);
+	}
+
 	/* successful, attach the worker to the pool */
 	worker_attach_to_pool(worker, pool);
 
