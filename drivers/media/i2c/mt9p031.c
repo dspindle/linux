@@ -30,6 +30,7 @@
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-of.h>
 #include <media/v4l2-subdev.h>
 
 #include "aptina-pll.h"
@@ -82,6 +83,8 @@
 #define		MT9P031_PIXEL_CLOCK_SHIFT(n)		((n) << 8)
 #define		MT9P031_PIXEL_CLOCK_DIVIDE(n)		((n) << 0)
 #define MT9P031_FRAME_RESTART				0x0b
+#define 	MT9P031_FRAME_RESTART_SET		(1 << 0)
+#define		MT9P031_FRAME_PAUSE_RESTART_SET		(1 << 1)
 #define MT9P031_SHUTTER_DELAY				0x0c
 #define MT9P031_RST					0x0d
 #define		MT9P031_RST_ENABLE			1
@@ -232,6 +235,7 @@ static int mt9p031_clk_setup(struct mt9p031 *mt9p031)
 
 	struct i2c_client *client = v4l2_get_subdevdata(&mt9p031->subdev);
 	struct mt9p031_platform_data *pdata = mt9p031->pdata;
+	unsigned long ext_freq;
 	int ret;
 
 	mt9p031->clk = devm_clk_get(&client->dev, NULL);
@@ -242,13 +246,15 @@ static int mt9p031_clk_setup(struct mt9p031 *mt9p031)
 	if (ret < 0)
 		return ret;
 
+	ext_freq = clk_get_rate(mt9p031->clk);
+
 	/* If the external clock frequency is out of bounds for the PLL use the
 	 * pixel clock divider only and disable the PLL.
 	 */
-	if (pdata->ext_freq > limits.ext_clock_max) {
+	if (ext_freq > limits.ext_clock_max) {
 		unsigned int div;
 
-		div = DIV_ROUND_UP(pdata->ext_freq, pdata->target_freq);
+		div = DIV_ROUND_UP(ext_freq, pdata->target_freq);
 		div = roundup_pow_of_two(div) / 2;
 
 		mt9p031->clk_div = min_t(unsigned int, div, 64);
@@ -257,7 +263,7 @@ static int mt9p031_clk_setup(struct mt9p031 *mt9p031)
 		return 0;
 	}
 
-	mt9p031->pll.ext_clock = pdata->ext_freq;
+	mt9p031->pll.ext_clock = ext_freq;
 	mt9p031->pll.pix_clock = pdata->target_freq;
 	mt9p031->use_pll = true;
 
@@ -373,6 +379,14 @@ static int __mt9p031_set_power(struct mt9p031 *mt9p031, bool on)
 		return ret;
 	}
 
+	/* Configure the pixel clock polarity */
+	if (mt9p031->pdata && mt9p031->pdata->pixclk_pol) {
+		ret = mt9p031_write(client, MT9P031_PIXEL_CLOCK_CONTROL,
+				MT9P031_PIXEL_CLOCK_INVERT);
+		if (ret < 0)
+			return ret;
+	}
+
 	return v4l2_ctrl_handler_setup(&mt9p031->ctrls);
 }
 
@@ -448,9 +462,21 @@ static int mt9p031_set_params(struct mt9p031 *mt9p031)
 static int mt9p031_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct mt9p031 *mt9p031 = to_mt9p031(subdev);
+	struct i2c_client *client = v4l2_get_subdevdata(subdev);
 	int ret;
 
 	if (!enable) {
+		/* enable pause restart */
+		ret = mt9p031_write(client, MT9P031_FRAME_RESTART,
+					MT9P031_FRAME_PAUSE_RESTART_SET);
+		if (ret < 0)
+			return ret;
+		/* enable reset + pause restart */
+		ret = mt9p031_write(client, MT9P031_FRAME_RESTART,
+					MT9P031_FRAME_PAUSE_RESTART_SET |
+					MT9P031_FRAME_RESTART_SET);
+		if (ret < 0)
+			return ret;
 		/* Stop sensor readout */
 		ret = mt9p031_set_output_control(mt9p031,
 						 MT9P031_OUTPUT_CONTROL_CEN, 0);
@@ -467,6 +493,10 @@ static int mt9p031_s_stream(struct v4l2_subdev *subdev, int enable)
 	/* Switch to master "normal" mode */
 	ret = mt9p031_set_output_control(mt9p031, 0,
 					 MT9P031_OUTPUT_CONTROL_CEN);
+	if (ret < 0)
+		return ret;
+	/* disbale reset + pause restart */
+	ret = mt9p031_write(client, MT9P031_FRAME_RESTART, 0);
 	if (ret < 0)
 		return ret;
 
@@ -673,6 +703,32 @@ static int mt9p031_restore_blc(struct mt9p031 *mt9p031)
 
 	return 0;
 }
+
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+static int mt9p031_g_register(struct v4l2_subdev *sd,
+			      struct v4l2_dbg_register *reg)
+{
+	struct mt9p031		*mt9p031 = to_mt9p031(sd);
+	struct i2c_client	*client = v4l2_get_subdevdata(&mt9p031->subdev);
+	int			rc;
+
+	rc = mt9p031_read(client, reg->reg);
+	if (rc < 0)
+		return rc;
+
+	reg->val = rc;
+	return 0;
+}
+
+static int mt9p031_s_register(struct v4l2_subdev *sd,
+			      struct v4l2_dbg_register const *reg)
+{
+	struct mt9p031		*mt9p031 = to_mt9p031(sd);
+	struct i2c_client	*client = v4l2_get_subdevdata(&mt9p031->subdev);
+
+	return mt9p031_write(client, reg->reg, reg->val);
+}
+#endif
 
 static int mt9p031_s_ctrl(struct v4l2_ctrl *ctrl)
 {
@@ -974,6 +1030,10 @@ static int mt9p031_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 
 static struct v4l2_subdev_core_ops mt9p031_subdev_core_ops = {
 	.s_power        = mt9p031_set_power,
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	.s_register	= mt9p031_s_register,
+	.g_register	= mt9p031_g_register,
+#endif
 };
 
 static struct v4l2_subdev_video_ops mt9p031_subdev_video_ops = {
@@ -1009,6 +1069,7 @@ static struct mt9p031_platform_data *
 mt9p031_get_pdata(struct i2c_client *client)
 {
 	struct mt9p031_platform_data *pdata;
+	struct v4l2_of_endpoint endpoint;
 	struct device_node *np;
 
 	if (!IS_ENABLED(CONFIG_OF) || !client->dev.of_node)
@@ -1018,12 +1079,18 @@ mt9p031_get_pdata(struct i2c_client *client)
 	if (!np)
 		return NULL;
 
+	if (v4l2_of_parse_endpoint(np, &endpoint) < 0)
+		goto done;
+
 	pdata = devm_kzalloc(&client->dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
 		goto done;
 
 	of_property_read_u32(np, "input-clock-frequency", &pdata->ext_freq);
 	of_property_read_u32(np, "pixel-clock-frequency", &pdata->target_freq);
+
+	pdata->pixclk_pol = !!(endpoint.bus.parallel.flags &
+			       V4L2_MBUS_PCLK_SAMPLE_RISING);
 
 done:
 	of_node_put(np);
@@ -1142,6 +1209,16 @@ static int mt9p031_probe(struct i2c_client *client,
 
 	ret = v4l2_async_register_subdev(&mt9p031->subdev);
 
+	if (ret < 0)
+		goto done;
+
+	ret = v4l2_async_register_subdev(&mt9p031->subdev);
+	if (ret < 0) {
+		dev_err(&client->dev, "v4l2_async_register_subdev() failed: %d\n",
+			ret);
+		goto done;
+	}
+
 done:
 	if (ret < 0) {
 		v4l2_ctrl_handler_free(&mt9p031->ctrls);
@@ -1157,6 +1234,7 @@ static int mt9p031_remove(struct i2c_client *client)
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct mt9p031 *mt9p031 = to_mt9p031(subdev);
 
+	v4l2_async_unregister_subdev(&mt9p031->subdev);
 	v4l2_ctrl_handler_free(&mt9p031->ctrls);
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
