@@ -184,6 +184,9 @@ static int gpio_sysfs_request_irq(struct device *dev, unsigned char flags)
 	if (ret < 0)
 		goto err_put_kn;
 
+	//??PATCHED mkaul@leuze.de 2015-11-09
+	irq_flags |= IRQF_NO_SOFTIRQ_CALL; // disable usage of soft-irq
+
 	ret = request_any_context_irq(data->irq, gpio_sysfs_irq, irq_flags,
 				"gpiolib", data);
 	if (ret < 0)
