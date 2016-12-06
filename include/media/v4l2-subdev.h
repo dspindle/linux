@@ -38,6 +38,9 @@
 
 #define	V4L2_DEVICE_NOTIFY_EVENT		_IOW('v', 2, struct v4l2_event)
 
+#define V4L2_SUBDEV_SYNC_LOCK_NOTIFY		_IOW('v', 2, u32)
+#define V4L2_SUBDEV_SYNC_LOCK			0x00000001
+
 struct v4l2_device;
 struct v4l2_ctrl_handler;
 struct v4l2_event;

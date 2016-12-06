@@ -15,6 +15,9 @@
 #include <drm/drm_fourcc.h>
 #include "ipu-prv.h"
 
+#define IPU_DRM_FORMAT_GENERIC8		v4l2_fourcc('I', 'P', 'U', '1')
+#define IPU_DRM_FORMAT_GENERIC16	v4l2_fourcc('I', 'P', 'U', '2')
+
 struct ipu_cpmem_word {
 	u32 data[5];
 	u32 res[3];
@@ -113,7 +116,7 @@ static void ipu_ch_param_write_field(struct ipuv3_channel *ch, u32 wbs, u32 v)
 	u32 mask = (1 << size) - 1;
 	u32 val;
 
-	pr_debug("%s %d %d %d\n", __func__, word, bit , size);
+	pr_debug("%s %d %d %d <= %d\n", __func__, word, bit , size, v);
 
 	val = readl(&base->word[word].data[i]);
 	val &= ~(mask << ofs);
@@ -139,8 +142,6 @@ static u32 ipu_ch_param_read_field(struct ipuv3_channel *ch, u32 wbs)
 	u32 mask = (1 << size) - 1;
 	u32 val = 0;
 
-	pr_debug("%s %d %d %d\n", __func__, word, bit , size);
-
 	val = (readl(&base->word[word].data[i]) >> ofs) & mask;
 
 	if ((bit + size - 1) / 32 > i) {
@@ -150,6 +151,8 @@ static u32 ipu_ch_param_read_field(struct ipuv3_channel *ch, u32 wbs)
 		tmp &= mask >> (ofs ? (32 - ofs) : 0);
 		val |= tmp << (ofs ? (32 - ofs) : 0);
 	}
+
+	pr_debug("%s %d %d %d => %d\n", __func__, word, bit , size, val);
 
 	return val;
 }
@@ -201,6 +204,27 @@ static int v4l2_pix_fmt_to_drm_fourcc(u32 pixelformat)
 		return DRM_FORMAT_NV12;
 	case V4L2_PIX_FMT_NV16:
 		return DRM_FORMAT_NV16;
+	case V4L2_PIX_FMT_SBGGR8:
+	case V4L2_PIX_FMT_SGBRG8:
+	case V4L2_PIX_FMT_SGRBG8:
+	case V4L2_PIX_FMT_SRGGB8:
+	case V4L2_PIX_FMT_GREY:
+	case V4L2_PIX_FMT_IPU_GENERIC_8:
+		return IPU_DRM_FORMAT_GENERIC8;
+	case V4L2_PIX_FMT_SBGGR10:
+	case V4L2_PIX_FMT_SGBRG10:
+	case V4L2_PIX_FMT_SGRBG10:
+	case V4L2_PIX_FMT_SRGGB10:
+	case V4L2_PIX_FMT_SBGGR12:
+	case V4L2_PIX_FMT_SGBRG12:
+	case V4L2_PIX_FMT_SGRBG12:
+	case V4L2_PIX_FMT_SRGGB12:
+	case V4L2_PIX_FMT_SBGGR16:
+	case V4L2_PIX_FMT_Y10:
+	case V4L2_PIX_FMT_Y12:
+	case V4L2_PIX_FMT_Y16:
+	case V4L2_PIX_FMT_IPU_GENERIC_16:
+		return IPU_DRM_FORMAT_GENERIC16;
 	}
 
 	return -EINVAL;
@@ -562,6 +586,8 @@ static const struct ipu_rgb def_bgra_16 = {
 
 int ipu_cpmem_set_fmt(struct ipuv3_channel *ch, u32 drm_fourcc)
 {
+	int	rc = 0;
+
 	switch (drm_fourcc) {
 	case DRM_FORMAT_YUV420:
 	case DRM_FORMAT_YVU420:
@@ -607,52 +633,58 @@ int ipu_cpmem_set_fmt(struct ipuv3_channel *ch, u32 drm_fourcc)
 		break;
 	case DRM_FORMAT_ABGR8888:
 	case DRM_FORMAT_XBGR8888:
-		ipu_cpmem_set_format_rgb(ch, &def_xbgr_32);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_xbgr_32);
 		break;
 	case DRM_FORMAT_ARGB8888:
 	case DRM_FORMAT_XRGB8888:
-		ipu_cpmem_set_format_rgb(ch, &def_xrgb_32);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_xrgb_32);
 		break;
 	case DRM_FORMAT_RGBA8888:
 	case DRM_FORMAT_RGBX8888:
-		ipu_cpmem_set_format_rgb(ch, &def_rgbx_32);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_rgbx_32);
 		break;
 	case DRM_FORMAT_BGRA8888:
 	case DRM_FORMAT_BGRX8888:
-		ipu_cpmem_set_format_rgb(ch, &def_bgrx_32);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_bgrx_32);
 		break;
 	case DRM_FORMAT_BGR888:
-		ipu_cpmem_set_format_rgb(ch, &def_bgr_24);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_bgr_24);
 		break;
 	case DRM_FORMAT_RGB888:
-		ipu_cpmem_set_format_rgb(ch, &def_rgb_24);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_rgb_24);
 		break;
 	case DRM_FORMAT_RGB565:
-		ipu_cpmem_set_format_rgb(ch, &def_rgb_16);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_rgb_16);
 		break;
 	case DRM_FORMAT_BGR565:
-		ipu_cpmem_set_format_rgb(ch, &def_bgr_16);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_bgr_16);
 		break;
 	case DRM_FORMAT_ARGB1555:
-		ipu_cpmem_set_format_rgb(ch, &def_argb_16);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_argb_16);
 		break;
 	case DRM_FORMAT_ABGR1555:
-		ipu_cpmem_set_format_rgb(ch, &def_abgr_16);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_abgr_16);
 		break;
 	case DRM_FORMAT_RGBA5551:
-		ipu_cpmem_set_format_rgb(ch, &def_rgba_16);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_rgba_16);
 		break;
 	case DRM_FORMAT_BGRA5551:
-		ipu_cpmem_set_format_rgb(ch, &def_bgra_16);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_bgra_16);
 		break;
 	case DRM_FORMAT_ARGB4444:
-		ipu_cpmem_set_format_rgb(ch, &def_argb_16_4444);
+		rc = ipu_cpmem_set_format_rgb(ch, &def_argb_16_4444);
+		break;
+	case IPU_DRM_FORMAT_GENERIC8:
+		rc = ipu_cpmem_set_format_passthrough(ch, 8);
+		break;
+	case IPU_DRM_FORMAT_GENERIC16:
+		rc = ipu_cpmem_set_format_passthrough(ch, 16);
 		break;
 	default:
 		return -EINVAL;
 	}
 
-	return 0;
+	return rc;
 }
 EXPORT_SYMBOL_GPL(ipu_cpmem_set_fmt);
 
@@ -660,6 +692,8 @@ int ipu_cpmem_set_image(struct ipuv3_channel *ch, struct ipu_image *image)
 {
 	struct v4l2_pix_format *pix = &image->pix;
 	int offset, u_offset, v_offset;
+	int rc;
+	int fourcc;
 
 	pr_debug("%s: resolution: %dx%d stride: %d\n",
 		 __func__, pix->width, pix->height,
@@ -668,7 +702,13 @@ int ipu_cpmem_set_image(struct ipuv3_channel *ch, struct ipu_image *image)
 	ipu_cpmem_set_resolution(ch, image->rect.width, image->rect.height);
 	ipu_cpmem_set_stride(ch, pix->bytesperline);
 
-	ipu_cpmem_set_fmt(ch, v4l2_pix_fmt_to_drm_fourcc(pix->pixelformat));
+	fourcc = v4l2_pix_fmt_to_drm_fourcc(pix->pixelformat);
+	if (fourcc < 0)
+		return fourcc;
+
+	rc = ipu_cpmem_set_fmt(ch, fourcc);
+	if (rc < 0)
+		return rc;
 
 	switch (pix->pixelformat) {
 	case V4L2_PIX_FMT_YUV420:
@@ -733,6 +773,31 @@ int ipu_cpmem_set_image(struct ipuv3_channel *ch, struct ipu_image *image)
 	case V4L2_PIX_FMT_RGB24:
 	case V4L2_PIX_FMT_BGR24:
 		offset = image->rect.left * 3 +
+			image->rect.top * pix->bytesperline;
+		break;
+	case V4L2_PIX_FMT_SBGGR8:
+	case V4L2_PIX_FMT_SGBRG8:
+	case V4L2_PIX_FMT_SGRBG8:
+	case V4L2_PIX_FMT_SRGGB8:
+	case V4L2_PIX_FMT_GREY:
+	case V4L2_PIX_FMT_IPU_GENERIC_8:
+		offset = image->rect.left * 1 +
+			image->rect.top * pix->bytesperline;
+		break;
+	case V4L2_PIX_FMT_SBGGR10:
+	case V4L2_PIX_FMT_SGBRG10:
+	case V4L2_PIX_FMT_SGRBG10:
+	case V4L2_PIX_FMT_SRGGB10:
+	case V4L2_PIX_FMT_SBGGR12:
+	case V4L2_PIX_FMT_SGBRG12:
+	case V4L2_PIX_FMT_SGRBG12:
+	case V4L2_PIX_FMT_SRGGB12:
+	case V4L2_PIX_FMT_SBGGR16:
+	case V4L2_PIX_FMT_Y10:
+	case V4L2_PIX_FMT_Y12:
+	case V4L2_PIX_FMT_Y16:
+	case V4L2_PIX_FMT_IPU_GENERIC_16:
+		offset = image->rect.left * 2 +
 			image->rect.top * pix->bytesperline;
 		break;
 	default:

@@ -137,6 +137,7 @@ struct ipu_csi {
 #define MIPI_DT_RAW10		0x2b
 #define MIPI_DT_RAW12		0x2c
 #define MIPI_DT_RAW14		0x2d
+#define MIPI_DT_RAW16		0x2e	/* TODO: really? */
 
 /*
  * Bitfield of CSI bus signal polarities and modes.
@@ -272,6 +273,7 @@ static int mbus_code_to_bus_cfg(struct ipu_csi_bus_config *cfg, u32 mbus_code)
 	case MEDIA_BUS_FMT_SGRBG8_1X8:
 	case MEDIA_BUS_FMT_SRGGB8_1X8:
 	case MEDIA_BUS_FMT_Y8_1X8:
+	case MEDIA_BUS_FMT_GENERIC_8:
 		cfg->data_fmt = CSI_SENS_CONF_DATA_FMT_BAYER;
 		cfg->mipi_dt = MIPI_DT_RAW8;
 		cfg->data_width = IPU_CSI_DATA_WIDTH_8;
@@ -310,6 +312,14 @@ static int mbus_code_to_bus_cfg(struct ipu_csi_bus_config *cfg, u32 mbus_code)
 		cfg->mipi_dt = MIPI_DT_RAW8;
 		cfg->data_width = IPU_CSI_DATA_WIDTH_8;
 		break;
+	case MEDIA_BUS_FMT_GENERIC_16:
+	case MEDIA_BUS_FMT_Y10_1X10:
+	case MEDIA_BUS_FMT_Y12_1X12:
+	case MEDIA_BUS_FMT_Y16_1X16:
+		cfg->data_fmt = CSI_SENS_CONF_DATA_FMT_BAYER;
+		cfg->mipi_dt = MIPI_DT_RAW16;
+		cfg->data_width = IPU_CSI_DATA_WIDTH_16;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -320,13 +330,17 @@ static int mbus_code_to_bus_cfg(struct ipu_csi_bus_config *cfg, u32 mbus_code)
 /*
  * Fill a CSI bus config struct from mbus_config and mbus_framefmt.
  */
-static void fill_csi_bus_cfg(struct ipu_csi_bus_config *csicfg,
+static int fill_csi_bus_cfg(struct ipu_csi_bus_config *csicfg,
 				 struct v4l2_mbus_config *mbus_cfg,
 				 struct v4l2_mbus_framefmt *mbus_fmt)
 {
+	int		rc;
+
 	memset(csicfg, 0, sizeof(*csicfg));
 
-	mbus_code_to_bus_cfg(csicfg, mbus_fmt->code);
+	rc = mbus_code_to_bus_cfg(csicfg, mbus_fmt->code);
+	if (rc < 0)
+		return rc;
 
 	switch (mbus_cfg->type) {
 	case V4L2_MBUS_PARALLEL:
@@ -337,6 +351,8 @@ static void fill_csi_bus_cfg(struct ipu_csi_bus_config *csicfg,
 				     V4L2_MBUS_HSYNC_ACTIVE_LOW) ? 1 : 0;
 		csicfg->pixclk_pol = (mbus_cfg->flags &
 				      V4L2_MBUS_PCLK_SAMPLE_FALLING) ? 1 : 0;
+		csicfg->data_en_pol = (mbus_cfg->flags &
+				       V4L2_MBUS_DATA_EN_ACTIVE_HIGH) ? 1 : 0;
 		csicfg->clk_mode = IPU_CSI_CLK_MODE_GATED_CLK;
 		break;
 	case V4L2_MBUS_BT656:
@@ -345,6 +361,20 @@ static void fill_csi_bus_cfg(struct ipu_csi_bus_config *csicfg,
 			csicfg->clk_mode = IPU_CSI_CLK_MODE_CCIR656_INTERLACED;
 		else
 			csicfg->clk_mode = IPU_CSI_CLK_MODE_CCIR656_PROGRESSIVE;
+		break;
+	case V4L2_MBUS_BT1120_SDR:
+		csicfg->ext_vsync = 0;
+		if (V4L2_FIELD_HAS_BOTH(mbus_fmt->field))
+			csicfg->clk_mode = IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_SDR;
+		else
+			csicfg->clk_mode = IPU_CSI_CLK_MODE_CCIR1120_PROGRESSIVE_SDR;
+		break;
+	case V4L2_MBUS_BT1120_DDR:
+		csicfg->ext_vsync = 0;
+		if (V4L2_FIELD_HAS_BOTH(mbus_fmt->field))
+			csicfg->clk_mode = IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_DDR;
+		else
+			csicfg->clk_mode = IPU_CSI_CLK_MODE_CCIR1120_PROGRESSIVE_DDR;
 		break;
 	case V4L2_MBUS_CSI2:
 		/*
@@ -357,6 +387,8 @@ static void fill_csi_bus_cfg(struct ipu_csi_bus_config *csicfg,
 		/* will never get here, keep compiler quiet */
 		break;
 	}
+
+	return 0;
 }
 
 int ipu_csi_init_interface(struct ipu_csi *csi,
@@ -366,8 +398,17 @@ int ipu_csi_init_interface(struct ipu_csi *csi,
 	struct ipu_csi_bus_config cfg;
 	unsigned long flags;
 	u32 data = 0;
+	int rc;
 
-	fill_csi_bus_cfg(&cfg, mbus_cfg, mbus_fmt);
+	rc = fill_csi_bus_cfg(&cfg, mbus_cfg, mbus_fmt);
+	if (rc < 0) {
+		dev_warn(csi->ipu->dev,
+			 "failed to get bus cfg for [%p(%04x), %p(%04x)]: %d\n",
+			 mbus_cfg, mbus_cfg ? mbus_cfg->type : 0,
+			 mbus_fmt, mbus_fmt ? mbus_fmt->code : 0,
+			 rc);
+		return rc;
+	}
 
 	/* Set the CSI_SENS_CONF register remaining fields */
 	data |= cfg.data_width << CSI_SENS_CONF_DATA_WIDTH_SHIFT |

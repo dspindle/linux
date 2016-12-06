@@ -43,6 +43,8 @@
 /* Active state of Sync-on-green (SoG) signal, 0/1 for LOW/HIGH respectively. */
 #define V4L2_MBUS_VIDEO_SOG_ACTIVE_HIGH	(1 << 12)
 #define V4L2_MBUS_VIDEO_SOG_ACTIVE_LOW		(1 << 13)
+#define V4L2_MBUS_DATA_EN_ACTIVE_HIGH		(1 << 14)
+#define V4L2_MBUS_DATA_EN_ACTIVE_LOW		(1 << 15)
 
 /* Serial flags */
 /* How many lanes the client can use */
@@ -75,6 +77,8 @@ enum v4l2_mbus_type {
 	V4L2_MBUS_PARALLEL,
 	V4L2_MBUS_BT656,
 	V4L2_MBUS_CSI2,
+	V4L2_MBUS_BT1120_SDR,
+	V4L2_MBUS_BT1120_DDR,
 };
 
 /**

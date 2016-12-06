@@ -994,6 +994,7 @@ static void platform_device_unregister_children(struct platform_device *pdev)
 struct ipu_platform_reg {
 	struct ipu_client_platformdata pdata;
 	const char *name;
+	int reg_offset;
 };
 
 /* These must be in the order of the corresponding device tree port nodes */
@@ -1004,6 +1005,7 @@ static struct ipu_platform_reg client_reg[] = {
 			.dma[0] = IPUV3_CHANNEL_CSI0,
 			.dma[1] = -EINVAL,
 		},
+		.reg_offset = IPU_CM_CSI0_REG_OFS,
 		.name = "imx-ipuv3-camera",
 	}, {
 		.pdata = {
@@ -1011,6 +1013,7 @@ static struct ipu_platform_reg client_reg[] = {
 			.dma[0] = IPUV3_CHANNEL_CSI1,
 			.dma[1] = -EINVAL,
 		},
+		.reg_offset = IPU_CM_CSI1_REG_OFS,
 		.name = "imx-ipuv3-camera",
 	}, {
 		.pdata = {
@@ -1030,6 +1033,8 @@ static struct ipu_platform_reg client_reg[] = {
 			.dma[1] = -EINVAL,
 		},
 		.name = "imx-ipuv3-crtc",
+	}, {
+		.name = "imx-ipuv3-scaler",
 	},
 };
 
@@ -1070,6 +1075,17 @@ static int ipu_add_client_devices(struct ipu_soc *ipu, unsigned long ipu_base)
 
 		pdev->dev.parent = dev;
 
+		if (reg->reg_offset) {
+			struct resource res;
+			memset(&res, 0, sizeof(res));
+			res.flags = IORESOURCE_MEM;
+			res.start = ipu_base + ipu->devtype->cm_ofs + reg->reg_offset;
+			res.end = res.start + PAGE_SIZE - 1;
+			ret = platform_device_add_resources(pdev, &res, 1);
+			if(ret)
+				goto err_register;
+		}
+ 
 		reg->pdata.of_node = of_node;
 		ret = platform_device_add_data(pdev, &reg->pdata,
 					       sizeof(reg->pdata));

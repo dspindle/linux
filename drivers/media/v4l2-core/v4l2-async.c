@@ -205,6 +205,7 @@ void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
 	unsigned int n_subdev = min(notif_n_subdev, V4L2_MAX_SUBDEVS);
 	struct device **dev;
 	int i = 0;
+	int j;
 
 	if (!notifier->v4l2_dev)
 		return;
@@ -226,9 +227,6 @@ void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
 
 		v4l2_async_cleanup(sd);
 
-		/* If we handled USB devices, we'd have to lock the parent too */
-		device_release_driver(d);
-
 		if (notifier->unbind)
 			notifier->unbind(notifier, sd, sd->asd);
 
@@ -243,6 +241,10 @@ void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
 	}
 
 	mutex_unlock(&list_lock);
+
+	for (j = 0; i < i; ++j)
+		/* If we handled USB devices, we'd have to lock the parent too */
+		device_release_driver(dev[j]);
 
 	/*
 	 * Call device_attach() to reprobe devices

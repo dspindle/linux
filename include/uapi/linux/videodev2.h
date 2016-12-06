@@ -628,6 +628,9 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_Y12I     v4l2_fourcc('Y', '1', '2', 'I') /* Greyscale 12-bit L/R interleaved */
 #define V4L2_PIX_FMT_Z16      v4l2_fourcc('Z', '1', '6', ' ') /* Depth data 16-bit */
 
+#define V4L2_PIX_FMT_IPU_GENERIC_8  v4l2_fourcc('I', 'P', 'U', '0') /* i.MX6 generic 8 bit data */
+#define V4L2_PIX_FMT_IPU_GENERIC_16 v4l2_fourcc('I', 'P', 'U', '1') /* i.MX6 generic 16 bit data */
+
 /* SDR formats - used only for Software Defined Radio devices */
 #define V4L2_SDR_FMT_CU8          v4l2_fourcc('C', 'U', '0', '8') /* IQ u8 */
 #define V4L2_SDR_FMT_CU16LE       v4l2_fourcc('C', 'U', '1', '6') /* IQ u16le */
