@@ -1,0 +1,215 @@
+/*
+ * Copyright (C) 2015 PHYTEC Messtechnik GmbH,
+ * Author: Stefan Christ <s.christ@phytec.de>
+ *
+ * The code contained herein is licensed under the GNU General Public
+ * License. You may obtain a copy of the GNU General Public License
+ * Version 2 or later at the following locations:
+ *
+ * http://www.opensource.org/licenses/gpl-license.html
+ * http://www.gnu.org/copyleft/gpl.html
+ */
+
+/dts-v1/;
+#include "imx6dl-phytec-ksp-0186-som.dtsi"
+
+/ {
+	model = "Phytec Board KSP-0186-B0 i.MX6 Solo/DualLite";
+	compatible = "phytec,imx6dl-ksp-0186-B0", "fsl,imx6dl";
+
+	chosen {
+		linux,stdout-path = &uart2;
+	};
+
+        dcr-bargraph {
+	    compatible = "gpio-leds";
+
+            oe {
+                label = "dcr200:bargraph:enable";
+		gpios = <&gpio2 29 GPIO_ACTIVE_LOW>;
+		default-state = "on";
+            };
+
+            bar_seg_0 {
+                label = "dcr200:green:bargraph0";
+		gpios = <&hc595 0 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+            bar_seg_20 {
+                label = "dcr200:green:bargraph20";
+		gpios = <&hc595 1 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+            bar_seg_40 {
+                label = "dcr200:green:bargraph40";
+		gpios = <&hc595 2 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+            bar_seg_60 {
+                label = "dcr200:green:bargraph60";
+		gpios = <&hc595 3 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+            bar_seg_80 {
+                label = "dcr200:green:bargraph80";
+		gpios = <&hc595 4 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+            bar_seg_100 {
+                label = "dcr200:green:bargraph100";
+		gpios = <&hc595 5 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+	    net0 {
+                label = "dcr200:green:net";
+		gpios = <&hc595 8 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+            net1 {
+                label = "dcr200:red:net";
+		gpios = <&hc595 9 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+
+	    power0 {
+                label = "dcr200:green:power";
+		gpios = <&hc595 10 GPIO_ACTIVE_LOW>;
+		linux,default-trigger = "timer";
+            };
+
+            power1 {
+                label = "dcr200:red:power";
+		gpios = <&hc595 11 GPIO_ACTIVE_LOW>;
+		default-state = "off";
+            };
+        };
+       
+	thermal_zones: thermal-zones {
+	};
+};
+
+&mt9v024 {
+	status = "disabled";
+};
+
+&color_shifter {
+	status = "disabled";
+};
+
+&phytec_mediabus {
+	mt9m021_stub@0 {
+	};
+};
+
+&i2c1 {
+	mt9m021: mt9m021@18 {
+		#thermal-sensor-cells = <0>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <
+			&pinctrl_imager_sensor
+
+			/* the ctrl pins should be in a more generic component
+			   but keep it here for now */
+			&pinctrl_imager_ctrl
+		>;
+
+		compatible = "aptina,mt9m021";
+		reg = <0x18>;
+
+		nreset-gpios  = <&gpio3 15 0>;
+		standby-gpios = <&gpio3 10 0>;
+		flash-gpios   = <&gpio3  9 0>;
+		trigger-gpios = <&gpio3 12 0>;
+		oebar-gpios   = <&gpio3 13 0>;
+
+		clocks = <&phytec_mediabus 0>;
+		clock-names = "extclk";
+
+		port {
+			mt9m021_ep: endpoint {
+			};
+		};
+	};
+};
+
+&i2c3 {
+	eeprom2: eeprom@54 {
+		compatible = "cat,24c1024"; /* chip is AT24CM01 (131072 Bytes, 1MBit) */
+		reg = <0x54>;
+		pagesize = <0x100>;
+	};
+};
+
+&fec {
+	status = "okay";
+};
+
+
+&uart2 {
+	status = "okay";
+};
+
+&uart3 {
+	status = "okay";
+};
+
+&ecspi1 {
+
+       /* illumination DAC is connected to this SPI interface using CS signal 0 */
+       illumination-dac@0 {
+            compatible = "spidev";
+            reg = <0>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            spi-max-frequency = <24000000>;
+        };
+
+       /* bargraph shift register is connected to this SPI interface using CS signal 1 */
+       hc595: shift-register@1 {
+          compatible = "fairchild,74hc595", "spidev"; /* this node will be used by the kernel driver during startup and by the userspace driver during system runtime */
+	   reg = <1>; /* shift register uses chip select line 1 */
+	   registers-number = <2>; /* 2 chained shift registers */
+	   spi-max-frequency = <100000>;
+
+	   gpio-controller;
+           #gpio-cells = <2>;
+
+           #address-cells = <1>;
+           #size-cells = <0>;
+       };
+};
+
+&usbotg {
+	status = "okay";
+	dr_mode = "host";
+	//??PATCHED dspindle@leuze.de 2015-08-06
+	// Disable over-current detection
+	disable-over-current;
+};
+
+&thermal_zones {
+	camera_zone: camera-thermal {
+		polling-delay-passive = <0>; /* milliseconds */
+		polling-delay         = <0>; /* milliseconds */
+		thermal-sensors = <&mt9m021>;
+
+		trips {
+			camera_alert0: camera-alert0 {
+				temperature = <70000>; /* millicelsius */
+				hysteresis = <2000>;   /* millicelsius */
+				type = "critical";
+			};
+		};
+
+		cooling-maps {
+		};
+	};
+};
