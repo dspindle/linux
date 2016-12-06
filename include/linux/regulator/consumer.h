@@ -209,6 +209,8 @@ int __must_check regulator_enable(struct regulator *regulator);
 int regulator_disable(struct regulator *regulator);
 int regulator_force_disable(struct regulator *regulator);
 int regulator_is_enabled(struct regulator *regulator);
+int regulator_is_same(struct regulator *regulator1,
+		      struct regulator *regulator2);
 int regulator_disable_deferred(struct regulator *regulator, int ms);
 
 int __must_check regulator_bulk_get(struct device *dev, int num_consumers,
@@ -243,6 +245,7 @@ unsigned int regulator_get_mode(struct regulator *regulator);
 int regulator_set_load(struct regulator *regulator, int load_uA);
 
 int regulator_allow_bypass(struct regulator *regulator, bool allow);
+int regulator_is_bypass(struct regulator *regulator);
 
 struct regmap *regulator_get_regmap(struct regulator *regulator);
 int regulator_get_hardware_vsel_register(struct regulator *regulator,
@@ -399,6 +402,12 @@ static inline int regulator_is_enabled(struct regulator *regulator)
 	return 1;
 }
 
+static inline int regulator_is_same(struct regulator *regulator1,
+				    struct regulator *regulator2)
+{
+	return 0;
+}
+
 static inline int regulator_bulk_get(struct device *dev,
 				     int num_consumers,
 				     struct regulator_bulk_data *consumers)
@@ -487,6 +496,11 @@ static inline int regulator_set_load(struct regulator *regulator, int load_uA)
 
 static inline int regulator_allow_bypass(struct regulator *regulator,
 					 bool allow)
+{
+	return 0;
+}
+
+static inline int regulator_is_bypass(struct regulator *regulator)
 {
 	return 0;
 }

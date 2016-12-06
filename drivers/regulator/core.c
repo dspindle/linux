@@ -2509,6 +2509,23 @@ int regulator_is_enabled(struct regulator *regulator)
 EXPORT_SYMBOL_GPL(regulator_is_enabled);
 
 /**
+ * regulator_is_same - are two regulators the same
+ * @regulator1: regulator source
+ * @regulator2: regulator source
+ *
+ * Returns positive if both regulators point to the same regulator_dev.
+ */
+int regulator_is_same(struct regulator *regulator1,
+		      struct regulator *regulator2)
+{
+	if (!regulator1 || !regulator2)
+		return -EINVAL;
+
+	return (regulator1->rdev == regulator2->rdev) ? 1 : 0;
+}
+EXPORT_SYMBOL_GPL(regulator_is_same);
+
+/**
  * regulator_count_voltages - count regulator_list_voltage() selectors
  * @regulator: regulator source
  *
@@ -3418,6 +3435,29 @@ int regulator_allow_bypass(struct regulator *regulator, bool enable)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(regulator_allow_bypass);
+
+/**
+ * regulator_is_bypass - determine if a regulator is in bypass mode
+ *
+ * @regulator: Regulator to configure
+ *
+ * return positive if regulator is in bypass mode.
+ */
+int regulator_is_bypass(struct regulator *regulator)
+{
+	struct regulator_dev *rdev = regulator->rdev;
+	int ret;
+
+	if (!regulator)
+		return -EINVAL;
+
+	mutex_lock(&rdev->mutex);
+	ret = regulator->bypass ? 1 : 0;
+	mutex_unlock(&rdev->mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(regulator_is_bypass);
 
 /**
  * regulator_register_notifier - register regulator event notifier
