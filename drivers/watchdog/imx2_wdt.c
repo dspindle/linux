@@ -32,6 +32,10 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/watchdog.h>
+#include <linux/uaccess.h>
+#include <linux/interrupt.h>
+#include <linux/sched.h>
+#include <linux/pid.h>
 
 #define DRIVER_NAME "imx2-wdt"
 
@@ -49,19 +53,29 @@
 
 #define IMX2_WDT_WRSR		0x04		/* Reset Status Register */
 #define IMX2_WDT_WRSR_TOUT	(1 << 1)	/* -> Reset due to Timeout */
-
+ 
+#define IMX2_WDT_WICR		0x06		/* Interrupt Control Register */
+#define IMX2_WDT_WICR_WIE	(1 << 15)	/* Enable Bit */
+#define IMX2_WDT_WICR_WTIS	(1 << 14)	/* Interrupt Status Bit */
+#define IMX2_WDT_WICR_WICT	(0xFF << 0)	/* TimeOut value */
+ 
 #define IMX2_WDT_WMCR		0x08		/* Misc Register */
 
 #define IMX2_WDT_MAX_TIME	128
 #define IMX2_WDT_DEFAULT_TIME	60		/* in seconds */
 
+#define IMX2_WDT_PT_SIGNAL	44		/* Signal used for notifying the pretimeout */
+
 #define WDOG_SEC_TO_COUNT(s)	((s * 2 - 1) << 8)
+#define WDOG_PT_SEC_TO_COUNT(s)	(s * 2)
 
 struct imx2_wdt_device {
 	struct clk *clk;
 	struct regmap *regmap;
 	struct watchdog_device wdog;
 	bool ext_reset;
+	int    irq;
+	int    pid;
 };
 
 static bool nowayout = WATCHDOG_NOWAYOUT;
@@ -75,9 +89,13 @@ module_param(timeout, uint, 0);
 MODULE_PARM_DESC(timeout, "Watchdog timeout in seconds (default="
 				__MODULE_STRING(IMX2_WDT_DEFAULT_TIME) ")");
 
+static unsigned pretimeout = 0;
+module_param(pretimeout, uint, 0);
+MODULE_PARM_DESC(pretimeout, "Watchdog pre-timeout in seconds (default=-not enabled-)");
+
 static const struct watchdog_info imx2_wdt_info = {
 	.identity = "imx2+ watchdog",
-	.options = WDIOF_KEEPALIVEPING | WDIOF_SETTIMEOUT | WDIOF_MAGICCLOSE,
+	.options = WDIOF_KEEPALIVEPING | WDIOF_SETTIMEOUT | WDIOF_MAGICCLOSE | WDIOF_PRETIMEOUT,
 };
 
 static int imx2_wdt_restart(struct watchdog_device *wdog, unsigned long action,
@@ -169,6 +187,33 @@ static int imx2_wdt_set_timeout(struct watchdog_device *wdog,
 	return 0;
 }
 
+static int imx2_wdt_set_pre_timeout(struct watchdog_device *wdog,
+				unsigned int new_pre_timeout)
+{
+	u32 val;
+	struct imx2_wdt_device *wdev = watchdog_get_drvdata(wdog);
+
+	pretimeout = new_pre_timeout;
+
+	regmap_read(wdev->regmap, IMX2_WDT_WICR, &val);
+
+	/* only set registers if pre-timeout was not enabled before */
+	/* once enabled pre-timeout can not be changed */
+	if( !(val & IMX2_WDT_WICR_WIE) ) {
+		/* Set the new pre-timeout value, write once-only */
+		val |= WDOG_PT_SEC_TO_COUNT(pretimeout);
+		/* Enable pre-timeout interrupt, write once-only */
+		val |= IMX2_WDT_WICR_WIE;
+	}
+
+	regmap_write(wdev->regmap, IMX2_WDT_WICR, val);
+
+	/* remember pid of process that activated pre-timeout */
+	wdev->pid = current->tgid;
+
+ 	return 0;
+} 
+
 static int imx2_wdt_start(struct watchdog_device *wdog)
 {
 	struct imx2_wdt_device *wdev = watchdog_get_drvdata(wdog);
@@ -183,12 +228,67 @@ static int imx2_wdt_start(struct watchdog_device *wdog)
 	return imx2_wdt_ping(wdog);
 }
 
+static long imx2_wdt_ioctl(struct watchdog_device *wdog, unsigned int cmd,
+				unsigned long arg)
+{
+	void __user *argp = (void __user *)arg;
+	int ret = -ENOIOCTLCMD;
+	int __user *p = argp;
+	int new_value;
+
+	switch (cmd) {
+		case WDIOC_SETPRETIMEOUT:
+			if (get_user(new_value, p)) return -EFAULT;
+			ret = imx2_wdt_set_pre_timeout(wdog, new_value);
+			if (ret) return ret;
+			ret = imx2_wdt_ping(wdog);
+			break;
+		case WDIOC_GETPRETIMEOUT:
+			ret = put_user(pretimeout, (int __user *)arg);
+			break;
+	}
+
+	return ret;
+}
+
+static irqreturn_t imx2_wdt_isr(int irq, void *dev_id)
+{
+	u32 val;
+	struct siginfo sinfo;
+	struct task_struct *task;
+	struct imx2_wdt_device *wdev = dev_id;
+
+	memset(&sinfo, 0, sizeof(struct siginfo));
+	sinfo.si_signo = IMX2_WDT_PT_SIGNAL;
+	sinfo.si_code = SI_KERNEL;
+
+	regmap_read(wdev->regmap, IMX2_WDT_WICR, &val);
+
+	if( val & IMX2_WDT_WICR_WTIS ) {
+		/* interrupt was fired, acknowledge */
+		val |= IMX2_WDT_WICR_WTIS;
+		regmap_write(wdev->regmap, IMX2_WDT_WICR, val);
+		/* send signal to process that activated pre-timeout before */
+		rcu_read_lock();
+		task = pid_task(find_vpid(wdev->pid), PIDTYPE_PID);
+		rcu_read_unlock();
+		if(task == NULL) {
+			//dev_err("imx2_wdt: Cannot find user program pid\n");
+			return IRQ_HANDLED;
+		}
+		send_sig_info (IMX2_WDT_PT_SIGNAL, &sinfo, task);
+	}
+
+	return IRQ_HANDLED;
+}
+
 static const struct watchdog_ops imx2_wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = imx2_wdt_start,
 	.ping = imx2_wdt_ping,
 	.set_timeout = imx2_wdt_set_timeout,
 	.restart = imx2_wdt_restart,
+	.ioctl = imx2_wdt_ioctl,
 };
 
 static const struct regmap_config imx2_wdt_regmap_config = {
@@ -227,6 +327,19 @@ static int __init imx2_wdt_probe(struct platform_device *pdev)
 	if (IS_ERR(wdev->clk)) {
 		dev_err(&pdev->dev, "can't get Watchdog clock\n");
 		return PTR_ERR(wdev->clk);
+	}
+
+	wdev->irq = platform_get_irq(pdev, 0);
+	if (wdev->irq < 0) {
+		ret = wdev->irq;
+		return ret;
+	}
+
+	ret = devm_request_irq(&pdev->dev, wdev->irq, imx2_wdt_isr, 0,
+				dev_name(&pdev->dev), wdev);
+	if (ret) {
+		dev_err(&pdev->dev, "can't get irq%d: %d\n", wdev->irq, ret);
+		return ret;
 	}
 
 	wdog			= &wdev->wdog;
